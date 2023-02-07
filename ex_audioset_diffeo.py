@@ -119,7 +119,7 @@ def evaluate(args):
     outputs[f"clean"] = []
     ##########
 
-    dl = DataLoader(dataset= my_get_test_set("/home/chiche/datasets/audioset-kaggle/", resample_rate=args.resample_rate), #get_test_set(resample_rate=args.resample_rate)
+    dl = DataLoader(dataset= my_get_test_set(args.dataset_path, resample_rate=args.resample_rate), #get_test_set(resample_rate=args.resample_rate)
                     worker_init_fn=worker_init_fn,
                     num_workers=args.num_workers,
                     batch_size=args.batch_size,
@@ -285,6 +285,8 @@ if __name__ == '__main__':
     parser.add_argument('--displacements', nargs=1, default=[1, 2], type=float)
     parser.add_argument('--axis', type=int, default=0)
     parser.add_argument('--num_diffeos', type=int, default=10)
+
+    parser.add_argument('--dataset_path', type=str,"/home/chiche/datasets/audioset-kaggle/")
 
     args = parser.parse_args()
 
