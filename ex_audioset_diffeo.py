@@ -32,18 +32,6 @@ def _mel_forward(x, mel):
     x = mel(x)
     x = x.reshape(old_shape[0], old_shape[1], x.shape[1], x.shape[2])
     return x
-'''
-def sample_sphere(input_tensor, noise_norm):
-    # Naive rejection sampling, suuper slow
-    rand_direction = torch.torch.rand_like(input_tensor)
-    norm = torch.linalg.norm(rand_direction, dim=(i for i in range(1, len(input_tensor.shape))))
-    rejected = norm>1
-    while rejected.any():
-        rand_direction[rejected] = torch.torch.rand_like(input_tensor[rejected])
-        norm = torch.linalg.norm(rand_direction[rejected], dim=(i for i in range(1, len(input_tensor.shape))))
-        rejected = norm>1
-    return rand_direction*noise_norm
-'''
 
 def _test(model, mel, eval_loader, device):
     model.eval()
@@ -286,7 +274,7 @@ if __name__ == '__main__':
     parser.add_argument('--axis', type=int, default=0)
     parser.add_argument('--num_diffeos', type=int, default=10)
 
-    parser.add_argument('--dataset_path', type=str,"/home/chiche/datasets/audioset-kaggle/")
+    parser.add_argument('--dataset_path', type=str,default="/home/chiche/datasets/audioset-kaggle/")
 
     args = parser.parse_args()
 
