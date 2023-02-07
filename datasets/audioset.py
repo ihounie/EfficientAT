@@ -5,6 +5,10 @@ import torch
 import numpy as np
 import h5py
 import os
+import pandas as pd
+from librosa import load, get_duration
+from tqdm import tqdm
+
 
 from datasets.helpers.audiodatasets import PreprocessDataset, get_roll_func
 
@@ -16,7 +20,7 @@ from datasets.helpers.audiodatasets import PreprocessDataset, get_roll_func
 # follow the instructions here to get these 3 files:
 # https://github.com/kkoutini/PaSST/tree/main/audioset
 
-dataset_dir = None
+dataset_dir = "/home/chiche/datasets/audioset201906/mp3"
 assert dataset_dir is not None, "Specify AudioSet location in variable 'dataset_dir'. " \
                                 "Check out the Readme file for further instructions. " \
                                 "https://github.com/fschmid56/EfficientAT/blob/main/README.md"
@@ -102,7 +106,6 @@ class AddIndexDataset(TorchDataset):
     def __len__(self):
         return len(self.ds)
 
-
 class AudioSetDataset(TorchDataset):
     def __init__(self, hdf5_file, sample_rate=32000, resample_rate=32000, classes_num=527,
                  clip_length=10, in_mem=False, gain_augment=0):
@@ -112,14 +115,14 @@ class AudioSetDataset(TorchDataset):
         self.sample_rate = sample_rate
         self.resample_rate = resample_rate
         self.hdf5_file = hdf5_file
+        self.dataset_file = None
         if in_mem:
             print("\nPreloading in memory\n")
             with open(hdf5_file, 'rb') as f:
                 self.hdf5_file = io.BytesIO(f.read())
         with h5py.File(hdf5_file, 'r') as f:
             self.length = len(f['audio_name'])
-            print(f"Dataset from {hdf5_file} with length {self.length}.")
-        self.dataset_file = None  # lazy init
+            print(f"Dataset from {hdf5_file} with length {self.length}.")  # lazy init
         self.clip_length = clip_length * sample_rate
         self.classes_num = classes_num
         self.gain_augment = gain_augment
@@ -156,7 +159,100 @@ class AudioSetDataset(TorchDataset):
         target = self.dataset_file['target'][index]
         target = np.unpackbits(target, axis=-1,
                                count=self.classes_num).astype(np.float32)
+        print(waveform.reshape(1, -1).shape)
+        print(target.shape)
+        print(type(target))
+        print(type(waveform))
+        print(type(audio_name))
+        print(waveform.dtype)
+        assert(0)
         return waveform.reshape(1, -1), audio_name, target
+
+    def resample(self, waveform):
+        """Resample.
+        Args:
+          waveform: (clip_samples,)
+        Returns:
+          (resampled_clip_samples,)
+        """
+        if self.resample_rate == 32000:
+            return waveform
+        elif self.resample_rate == 16000:
+            return waveform[0:: 2]
+        elif self.resample_rate == 8000:
+            return waveform[0:: 4]
+        else:
+            raise Exception('Incorrect sample rate!')
+
+class MyAudioSetDataset(TorchDataset):
+    def __init__(self, dataroot, wav_folder="valid_wav", csv="valid.csv", index_lut_csv="class_labels_indices.csv",
+     sample_rate=32000, resample_rate=32000, classes_num=527,
+                 clip_length=10, in_mem=False, gain_augment=0):
+        """
+        Reads the mp3 bytes from HDF file decodes using av and returns a fixed length audio wav
+        """
+        self.sample_rate = sample_rate
+        self.resample_rate = resample_rate
+        self.clip_length = clip_length * sample_rate
+        self.classes_num = classes_num
+        self.gain_augment = gain_augment
+        self.dataroot = dataroot
+        self.audio_path = os.path.join(dataroot, wav_folder)
+        print(self.audio_path)
+        self.csv_path = os.path.join(dataroot, csv)
+        self.index_path = os.path.join(dataroot, index_lut_csv)
+        self.parse_dataset()
+
+    def parse_dataset(self):
+        metadata = pd.read_csv(self.csv_path)
+        labels_to_idx = pd.read_csv(self.index_path)
+        self.num_classes = len(labels_to_idx) 
+        label_list = lambda label_string: label_string.split(",")
+        label_to_idx = lambda label_list: [labels_to_idx.loc[labels_to_idx["mid"]==m,"index"].iloc[0] for m in label_list]
+        metadata["positive_labels"] = metadata["positive_labels"].apply(label_list)
+        metadata["positive_labels"] = metadata["positive_labels"].apply(label_to_idx)
+        self.files = []
+        metadata_str = metadata['YTID'].str
+        #i = 0
+        for dirname, _, filenames in os.walk(self.audio_path):
+            print("pre-processing dataset")
+            y = torch.zeros(len(filenames), self.num_classes)
+            indexes = []
+            for index, filename in tqdm(enumerate(filenames)):
+                filepath = os.path.join(dirname, filename)
+                if os.path.getsize(filepath)>40000:
+                    pos = metadata.loc[metadata_str.contains(filename[:-4]), "positive_labels"].iloc[0]
+                    y[index, pos] = 1
+                    indexes.append(index)
+                    self.files.append(filepath)
+                else:
+                    print(f"{filename} discarded")
+                #i+=1
+                #if i>1000:
+                #    break
+        
+        self.length = len(self.files) 
+        self.labels = y[indexes, :]
+
+    def __len__(self):
+        return self.length
+    def __getitem__(self, index):
+        """Load waveform and target of an audio clip.
+        Args:
+          'index': int
+        Returns:
+          data_dict: {
+            'audio_name': str,
+            'waveform': (clip_samples,),
+            'target': (classes_num,)}
+        """
+        audio_name = self.files[index]
+        waveform, _ = load(audio_name, sr=self.sample_rate, mono=True)
+        waveform = pydub_augment(waveform, self.gain_augment)
+        waveform = pad_or_truncate(waveform, self.clip_length)
+        waveform = self.resample(waveform)
+        target = self.labels[index]
+        return waveform.reshape(1, -1),audio_name, target
 
     def resample(self, waveform):
         """Resample.
@@ -261,4 +357,8 @@ def get_full_training_set(add_index=True, roll=False, wavmix=False, gain_augment
 
 def get_test_set(resample_rate=32000):
     ds = get_base_test_set(resample_rate=resample_rate)
+    return ds
+
+def my_get_test_set(dataroot, resample_rate=32000):
+    ds = MyAudioSetDataset(dataroot, resample_rate=resample_rate)
     return ds

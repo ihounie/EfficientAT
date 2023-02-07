@@ -12,11 +12,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.hub import download_url_to_file
 
-from datasets.audioset import get_test_set, get_full_training_set, get_ft_weighted_sampler
+from datasets.audioset import my_get_test_set, get_full_training_set, get_ft_weighted_sampler
 from models.MobileNetV3 import get_model as get_mobilenet, get_ensemble_model
 from models.preprocess import AugmentMelSTFT
 from helpers.init import worker_init_fn
 from helpers.utils import NAME_TO_WIDTH, exp_warmup_linear_down, mixup
+import wandb
 
 preds_url = \
     "https://github.com/fschmid56/EfficientAT/releases/download/v0.0.1/passt_enemble_logits_mAP_495.npy"
@@ -240,11 +241,11 @@ def evaluate(args):
                          n_fft=args.n_fft,
                          fmin=args.fmin,
                          fmax=args.fmax
-                         )
+                        )
     mel.to(device)
     mel.eval()
 
-    dl = DataLoader(dataset=get_test_set(resample_rate=args.resample_rate),
+    dl = DataLoader(dataset= my_get_test_set("/home/chiche/datasets/audioset-kaggle/", resample_rate=args.resample_rate), #get_test_set(resample_rate=args.resample_rate)
                     worker_init_fn=worker_init_fn,
                     num_workers=args.num_workers,
                     batch_size=args.batch_size)
@@ -274,6 +275,7 @@ def evaluate(args):
     print(f"Results on AudioSet test split for loaded model: {model_name}")
     print("  mAP: {:.3f}".format(mAP.mean()))
     print("  ROC: {:.3f}".format(ROC.mean()))
+    wandb.log({"mAP": mAP.mean(), "ROC": ROC.mean()})
 
 
 if __name__ == '__main__':
@@ -329,6 +331,8 @@ if __name__ == '__main__':
     parser.add_argument('--fmax', type=int, default=None)
 
     args = parser.parse_args()
+    wandb.init(project="Audio Diffeo", entity="alelab", config=args, name=args.experiment_name)
+
     if args.train:
         train(args)
     else:
